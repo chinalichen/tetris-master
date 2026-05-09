@@ -6,6 +6,7 @@ import { parseImageData } from '../src/lib/vision';
 
 describe('Vision Module', () => {
   const screenshotsDir = path.join(__dirname, 'screenshots');
+  const groundTruthDir = path.join(__dirname, 'ground-truth');
   const files = fs.readdirSync(screenshotsDir).filter(f => f.endsWith('.jpeg') || f.endsWith('.jpg'));
 
   for (const file of files) {
@@ -36,9 +37,24 @@ describe('Vision Module', () => {
       });
 
       // Verify that board size is somewhat reasonable compared to the image width
-      // Typically board width is around 80-95% of the screen width
       expect(state.boardRect.w).toBeGreaterThan(imgData.width * 0.7);
       expect(state.boardRect.w).toBeLessThan(imgData.width * 0.99);
+
+      // If ground truth exists, compare with it
+      const groundTruthPath = path.join(groundTruthDir, file.replace('.jpeg', '.json').replace('.jpg', '.json'));
+      if (fs.existsSync(groundTruthPath)) {
+        const groundTruth = JSON.parse(fs.readFileSync(groundTruthPath, 'utf-8'));
+        
+        // Compare board
+        expect(state.board).toEqual(groundTruth.board);
+        
+        // Compare pieces
+        expect(state.pieces).toEqual(groundTruth.pieces);
+        
+        console.log(`✓ ${file} matches ground truth`);
+      } else {
+        console.log(`⚠ ${file} - no ground truth found, skipping comparison`);
+      }
 
       // Log some info for debugging if needed
       console.log(`${file}: boardRect=${JSON.stringify(state.boardRect)}`);

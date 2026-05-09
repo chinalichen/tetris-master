@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>游戏状态编辑器 - Tetris Vision</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .cell { transition: all 0.15s; }
+    .cell:hover { transform: scale(1.1); z-index: 10; }
+    .board-cell { width: 40px; height: 40px; }
+    .piece-cell { width: 50px; height: 50px; }
+    @media (max-width: 640px) {
+      .board-cell { width: 32px; height: 32px; }
+      .piece-cell { width: 40px; height: 40px; }
+    }
+    .loading { 
+      display: inline-block; 
+      width: 20px; 
+      height: 20px; 
+      border: 3px solid #f3f3f3; 
+      border-top: 3px solid #3498db; 
+      border-radius: 50%; 
+      animation: spin 1s linear infinite; 
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .tab-active { border-bottom-color: #3b82f6; color: #3b82f6; }
+    .tab-inactive { border-bottom-color: transparent; color: #6b7280; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div id="app" class="max-w-7xl mx-auto p-4">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow-sm p-4 mb-4">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-800">游戏状态编辑器</h1>
+          <p class="text-sm text-gray-500 mt-1">加载截图 → 自动解析 → 手动修正 → 导出 JSON</p>
+        </div>
+        <div class="flex gap-2">
+          <label class="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <span>加载截图</span>
+            <input type="file" accept="image/jpeg,image/jpg" id="fileInput" class="hidden" multiple>
+          </label>
+          <button id="exportAllBtn" class="hidden inline-flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>导出全部</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screenshots List -->
+    <div id="screenshotsList" class="bg-white rounded-lg shadow-sm p-4 mb-4 hidden">
+      <h2 class="text-lg font-semibold mb-3">已加载截图 (<span id="screenshotCount">0</span>)</h2>
+      <div id="thumbnails" class="flex gap-2 overflow-x-auto pb-2"></div>
+    </div>
+
+    <!-- Editor -->
+    <div id="editor" class="hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Left Column -->
+        <div class="space-y-4">
+          <!-- Image Preview -->
+          <div class="bg-white rounded-lg shadow-sm p-4">
+            <div class="flex justify-between items-center mb-3">
+              <h2 class="text-lg font-semibold">截图预览</h2>
+              <div class="flex items-center gap-2">
+                <span id="parsingStatus" class="text-sm text-blue-600 hidden"><span class="loading"></span> 解析中...</span>
+                <span id="currentFile" class="text-sm text-gray-500"></span>
+              </div>
+            </div>
+            <div class="relative overflow-auto max-h-[600px] border rounded-lg">
+              <img id="previewImage" class="max-w-full object-contain block" alt="Screenshot">
+              <canvas id="overlayCanvas" class="absolute top-0 left-0 pointer-events-none"></canvas>
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button id="reparseBtn" class="inline-flex items-center gap-2 px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                重新解析
+              </button>
+              <button id="toggleOverlayBtn" class="inline-flex items-center gap-2 px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                切换覆盖层
+              </button>
+            </div>
+          </div>
+
+          <!-- Navigation -->
+          <div class="flex gap-4">
+            <button id="prevScreenshot" class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+              上一个
+            </button>
+            <button id="nextScreenshot" class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              下一个
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="space-y-4">
+          <!-- Editor Tabs -->
+          <div class="bg-white rounded-lg shadow-sm p-4">
+            <div class="flex gap-2 mb-4 border-b">
+              <button id="tabBoard" class="tab-btn flex items-center gap-2 px-4 py-2 font-medium border-b-2 tab-active transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                棋盘
+              </button>
+              <button id="tabPieces" class="tab-btn flex items-center gap-2 px-4 py-2 font-medium border-b-2 tab-inactive transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+                形状
+              </button>
+            </div>
+
+            <!-- Board Panel -->
+            <div id="boardPanel" class="tab-panel">
+              <div class="flex justify-between items-center mb-4">
+                <h3 class="font-medium">8×8 棋盘</h3>
+                <div class="flex gap-2">
+                  <button id="clearBoard" class="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors">清空</button>
+                  <button id="fillBoard" class="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">填满</button>
+                </div>
+              </div>
+              <div id="boardGrid" class="inline-block border-2 border-gray-800 rounded-lg overflow-hidden"></div>
+              <p class="text-sm text-gray-500 mt-2">点击格子切换状态。蓝色 = 已填充</p>
+            </div>
+
+            <!-- Pieces Panel -->
+            <div id="piecesPanel" class="tab-panel hidden">
+              <div class="flex gap-2 mb-4">
+                <button class="piece-tab px-4 py-2 rounded-lg font-medium bg-purple-500 text-white" data-piece="0">形状 1</button>
+                <button class="piece-tab px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-piece="1">形状 2</button>
+                <button class="piece-tab px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-piece="2">形状 3</button>
+              </div>
+
+              <div id="pieceEditor" class="border rounded-lg p-4 bg-gray-50">
+                <div class="flex justify-between items-center mb-4">
+                  <h3 class="font-medium">形状 <span id="pieceNumber">1</span></h3>
+                  <div class="flex gap-2">
+                    <button id="removeRow" class="px-2 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50">-行</button>
+                    <button id="addRow" class="px-2 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50">+行</button>
+                    <button id="removeCol" class="px-2 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50">-列</button>
+                    <button id="addCol" class="px-2 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50">+列</button>
+                  </div>
+                </div>
+                <div id="pieceGrid" class="inline-block border-2 border-gray-800 rounded-lg overflow-hidden"></div>
+                <p class="text-sm text-gray-500 mt-2">点击格子切换状态。紫色 = 已填充。最大 5×5</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- JSON Preview -->
+          <div class="bg-white rounded-lg shadow-sm p-4">
+            <div class="flex justify-between items-center mb-3">
+              <h2 class="text-lg font-semibold">JSON 预览</h2>
+              <div class="flex gap-2">
+                <button id="copyJson" class="inline-flex items-center gap-2 px-3 py-1 text-sm bg-gray-100 rounded hover:bg-gray-200 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  复制
+                </button>
+                <button id="downloadJson" class="inline-flex items-center gap-2 px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  下载
+                </button>
+              </div>
+            </div>
+            <pre id="jsonPreview" class="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto max-h-64 text-sm">等待解析...</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="bg-white rounded-lg shadow-sm p-12 text-center">
+      <div class="text-6xl mb-4">🎮</div>
+      <p class="text-gray-500 text-lg">请加载截图开始编辑</p>
+      <p class="text-gray-400 text-sm mt-2">支持 JPEG 格式，建议从 iPhone 截图</p>
+      <div class="mt-6 p-4 bg-blue-50 rounded-lg text-left max-w-md mx-auto">
+        <p class="text-sm text-blue-800 font-medium mb-2">使用步骤：</p>
+        <ol class="text-sm text-blue-700 list-decimal list-inside space-y-1">
+          <li>点击"加载截图"选择游戏截图</li>
+          <li>系统自动解析棋盘和形状</li>
+          <li>在编辑器中修正识别结果</li>
+          <li>导出 JSON 文件用于测试</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Vision module (embedded for standalone use)
+    const VISION = {
+      COLOR_DIST_BACKGROUND: 40,
+      COLOR_DIST_FILLED_BOARD: 20,
+      COLOR_DIST_FILLED_PIECE: 25,
+      BOARD_WIDTH_RATIO: 0.6,
+      BOARD_BOTTOM_GAP_RATIO: 0.2,
+      PIECE_REGION_TOP_PADDING: 0.05,
+      PIECE_REGION_BOTTOM_PADDING: 0.1,
+      PIECE_GAP_RATIO: 0.02,
+      PIECE_BLOCK_MIN_RATIO: 0.45,
+      PIECE_BLOCK_MAX_RATIO: 0.65,
+      PIECE_BLOCK_FALLBACK_RATIO: 0.5,
+      PIECE_MAX_DIMENSION: 5,
+      BACKGROUND_SAMPLE_X: 5,
+    };
+
+    function getPixel(data, width, x, y) {
+      const i = (y * width + x) * 4;
+      return { r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3] };
+    }
+
+    function colorDist(c1, c2) {
+      return Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b);
+    }
+
+    function parseImageData(imgData) {
+      const data = imgData.data;
+      const w = imgData.width;
+      const h = imgData.height;
+
+      let boardTop = -1, boardBottom = -1, boardLeft = -1, boardRight = -1;
+      let firstY = -1;
+
+      for (let y = 0; y < h; y++) {
+        const rowBgColor = getPixel(data, w, VISION.BACKGROUND_SAMPLE_X, y);
+        let diffCount = 0, firstX = -1, lastX = -1;
+        for (let x = 0; x < w; x++) {
+          const c = getPixel(data, w, x, y);
+          if (colorDist(c, rowBgColor) > VISION.COLOR_DIST_BACKGROUND) {
+            diffCount++;
+            if (firstX === -1) firstX = x;
+            lastX = x;
+          }
+        }
+        if (diffCount > w * VISION.BOARD_WIDTH_RATIO) {
+          if (firstY === -1) firstY = y;
+          if (boardRight !== -1 && boardLeft !== -1) {
+            const currentEstSize = boardRight - boardLeft;
+            if (y > firstY + currentEstSize + 50) break;
+          }
+          if (boardLeft === -1 || firstX < boardLeft) boardLeft = firstX;
+          if (boardRight === -1 || lastX > boardRight) boardRight = lastX;
+        } else {
+          if (firstY !== -1 && diffCount < w * VISION.BOARD_BOTTOM_GAP_RATIO) {
+            const currentEstSize = boardRight - boardLeft;
+            if (y > firstY + currentEstSize * 0.8) break;
+          }
+        }
+      }
+
+      boardTop = firstY;
+      const detectedWidth = boardRight - boardLeft;
+      const boardSize = detectedWidth;
+      boardBottom = boardTop + boardSize;
+      const cellSize = boardSize / 8;
+
+      const board = [];
+      let minScore = Infinity;
+      let emptyCellColor = { r: 0, g: 0, b: 0 };
+      const cellCenters = [];
+
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const cx = Math.floor(boardLeft + col * cellSize + cellSize / 2);
+          const cy = Math.floor(boardTop + row * cellSize + cellSize / 2);
+          const color = getPixel(data, w, cx, cy);
+          cellCenters.push({ r: row, c: col, color });
+          const variance = Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b);
+          const brightness = color.r + color.g + color.b;
+          const score = variance + brightness * 0.05;
+          if (score < minScore) {
+            minScore = score;
+            emptyCellColor = color;
+          }
+        }
+      }
+
+      let i = 0;
+      for (let row = 0; row < 8; row++) {
+        const boardRow = [];
+        for (let col = 0; col < 8; col++) {
+          const color = cellCenters[i++].color;
+          boardRow.push(colorDist(color, emptyCellColor) > VISION.COLOR_DIST_FILLED_BOARD);
+        }
+        board.push(boardRow);
+      }
+
+      const pieceRegionTop = boardBottom + Math.floor(h * VISION.PIECE_REGION_TOP_PADDING);
+      const pieceRegionBottom = h - Math.floor(h * VISION.PIECE_REGION_BOTTOM_PADDING);
+      const pieceSectionWidth = w / 3;
+      const pieceRects = [];
+
+      for (let pIdx = 0; pIdx < 3; pIdx++) {
+        const secLeft = Math.floor(pIdx * pieceSectionWidth);
+        const secRight = Math.floor((pIdx + 1) * pieceSectionWidth);
+        let pTop = -1, pBottom = -1, pLeft = -1, pRight = -1;
+        let consecutiveEmptyRows = 0;
+        for (let y = pieceRegionTop; y < pieceRegionBottom; y++) {
+          const rowBgColor = getPixel(data, w, VISION.BACKGROUND_SAMPLE_X, y);
+          let foundPixel = false;
+          for (let x = secLeft; x < secRight; x++) {
+            const c = getPixel(data, w, x, y);
+            if (colorDist(c, rowBgColor) > VISION.COLOR_DIST_BACKGROUND) {
+              if (pTop === -1) pTop = y;
+              pBottom = y;
+              if (pLeft === -1 || x < pLeft) pLeft = x;
+              if (pRight === -1 || x > pRight) pRight = x;
+              foundPixel = true;
+            }
+          }
+          if (pTop !== -1) {
+            if (!foundPixel) consecutiveEmptyRows++;
+            else consecutiveEmptyRows = 0;
+            if (consecutiveEmptyRows > h * VISION.PIECE_GAP_RATIO) break;
+          }
+        }
+        if (pTop !== -1) {
+          pieceRects.push({ x: pLeft, y: pTop, w: pRight - pLeft, h: pBottom - pTop });
+        }
+      }
+
+      const minBs = cellSize * VISION.PIECE_BLOCK_MIN_RATIO;
+      const maxBs = cellSize * VISION.PIECE_BLOCK_MAX_RATIO;
+      let bestBs = cellSize * VISION.PIECE_BLOCK_FALLBACK_RATIO;
+      let minError = Infinity;
+
+      for (let bs = minBs; bs <= maxBs; bs += 0.5) {
+        let err = 0;
+        for (const rect of pieceRects) {
+          const cols = Math.max(1, Math.round(rect.w / bs));
+          const rows = Math.max(1, Math.round(rect.h / bs));
+          err += Math.abs(rect.w - cols * bs) + Math.abs(rect.h - rows * bs);
+        }
+        if (err < minError) {
+          minError = err;
+          bestBs = bs;
+        }
+      }
+
+      const pieces = [];
+      for (const rect of pieceRects) {
+        let cols = Math.max(1, Math.round(rect.w / bestBs));
+        let rows = Math.max(1, Math.round(rect.h / bestBs));
+        if (cols > VISION.PIECE_MAX_DIMENSION) cols = VISION.PIECE_MAX_DIMENSION;
+        if (rows > VISION.PIECE_MAX_DIMENSION) rows = VISION.PIECE_MAX_DIMENSION;
+        const bsX = rect.w / cols;
+        const bsY = rect.h / rows;
+        const piece = [];
+        for (let r = 0; r < rows; r++) {
+          const pieceRow = [];
+          for (let c = 0; c < cols; c++) {
+            let maxDist = 0;
+            for (let dy = -0.25; dy <= 0.25; dy += 0.25) {
+              for (let dx = -0.25; dx <= 0.25; dx += 0.25) {
+                const cx = Math.floor(rect.x + c * bsX + bsX / 2 + dx * bsX);
+                const cy = Math.floor(rect.y + r * bsY + bsY / 2 + dy * bsY);
+                const color = getPixel(data, w, cx, cy);
+                const rowBgColor = getPixel(data, w, VISION.BACKGROUND_SAMPLE_X, cy);
+                const dist = colorDist(color, rowBgColor);
+                if (dist > maxDist) maxDist = dist;
+              }
+            }
+            pieceRow.push(maxDist > VISION.COLOR_DIST_FILLED_PIECE);
+          }
+          piece.push(pieceRow);
+        }
+        pieces.push(piece);
+      }
+
+      return {
+        board,
+        pieces,
+        boardRect: { x: boardLeft, y: boardTop, w: boardSize, h: boardSize },
+        pieceRects
+      };
+    }
+
+    // App State
+    let screenshots = [];
+    let currentIndex = 0;
+    let board = Array(8).fill(null).map(() => Array(8).fill(false));
+    let pieces = [[], [], []];
+    let selectedPiece = 0;
+    let boardRect = { x: 0, y: 0, w: 0, h: 0 };
+    let pieceRects = [];
+    let showOverlay = true;
+
+    // DOM Elements
+    const fileInput = document.getElementById('fileInput');
+    const screenshotsList = document.getElementById('screenshotsList');
+    const screenshotCount = document.getElementById('screenshotCount');
+    const thumbnails = document.getElementById('thumbnails');
+    const editor = document.getElementById('editor');
+    const emptyState = document.getElementById('emptyState');
+    const previewImage = document.getElementById('previewImage');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const currentFile = document.getElementById('currentFile');
+    const parsingStatus = document.getElementById('parsingStatus');
+    const boardGrid = document.getElementById('boardGrid');
+    const pieceGrid = document.getElementById('pieceGrid');
+    const jsonPreview = document.getElementById('jsonPreview');
+    const exportAllBtn = document.getElementById('exportAllBtn');
+
+    // Tab switching
+    document.getElementById('tabBoard').addEventListener('click', () => setTab('board'));
+    document.getElementById('tabPieces').addEventListener('click', () => setTab('pieces'));
+
+    function setTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('tab-active');
+        btn.classList.add('tab-inactive');
+      });
+      document.getElementById('tab' + (tab === 'board' ? 'Board' : 'Pieces')).classList.remove('tab-inactive');
+      document.getElementById('tab' + (tab === 'board' ? 'Board' : 'Pieces')).classList.add('tab-active');
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+      document.getElementById(tab + 'Panel').classList.remove('hidden');
+    }
+
+    // Piece tab switching
+    document.querySelectorAll('.piece-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedPiece = parseInt(btn.dataset.piece);
+        document.querySelectorAll('.piece-tab').forEach(b => {
+          b.classList.remove('bg-purple-500', 'text-white');
+          b.classList.add('bg-gray-200', 'text-gray-700');
+        });
+        btn.classList.remove('bg-gray-200', 'text-gray-700');
+        btn.classList.add('bg-purple-500', 'text-white');
+        document.getElementById('pieceNumber').textContent = selectedPiece + 1;
+        renderPieceGrid();
+      });
+    });
+
+    // File loading
+    fileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      for (const file of files) {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.src = url;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+        screenshots.push({ file, url, width: img.width, height: img.height, name: file.name, state: null });
+      }
+      if (screenshots.length > 0) {
+        screenshotCount.textContent = screenshots.length;
+        renderThumbnails();
+        await loadScreenshot(0);
+        emptyState.classList.add('hidden');
+        screenshotsList.classList.remove('hidden');
+        editor.classList.remove('hidden');
+        exportAllBtn.classList.remove('hidden');
+      }
+    });
+
+    function renderThumbnails() {
+      thumbnails.innerHTML = screenshots.map((s, i) => `
+        <button onclick="window.loadScreenshotByIndex(${i})" 
+          class="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-colors ${i === currentIndex ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-300 hover:border-blue-400'}"
+        >
+          <img src="${s.url}" class="w-full h-full object-cover" alt="${s.name}">
+          ${s.state ? '<span class="absolute top-1 right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></span>' : ''}
+        </button>
+      `).join('');
+    }
+
+    async function parseScreenshot(index) {
+      const s = screenshots[index];
+      parsingStatus.classList.remove('hidden');
+      try {
+        const img = new Image();
+        img.src = s.url;
+        await new Promise(resolve => img.onload = resolve);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        const state = parseImageData(imageData);
+        screenshots[index].state = state;
+        return state;
+      } catch (err) {
+        console.error('Parse error:', err);
+        alert('解析失败: ' + err.message);
+        return null;
+      } finally {
+        parsingStatus.classList.add('hidden');
+      }
+    }
+
+    async function loadScreenshot(index) {
+      currentIndex = index;
+      const s = screenshots[index];
+      previewImage.src = s.url;
+      currentFile.textContent = `${s.name} (${s.width}×${s.height})`;
+      if (!s.state) await parseScreenshot(index);
+      const state = screenshots[index].state;
+      if (state) {
+        board = state.board.map(row => [...row]);
+        pieces = state.pieces.map(p => p.map(row => [...row]));
+        boardRect = { ...state.boardRect };
+        pieceRects = state.pieceRects.map(r => ({ ...r }));
+      }
+      renderBoardGrid();
+      renderPieceGrid();
+      updateJsonPreview();
+      drawOverlay();
+      renderThumbnails();
+    }
+
+    window.loadScreenshotByIndex = loadScreenshot;
+
+    function drawOverlay() {
+      const canvas = overlayCanvas;
+      const img = previewImage;
+      if (!canvas || !img) return;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.style.width = img.width + 'px';
+      canvas.style.height = img.height + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!showOverlay) return;
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
+      const cellSize = boardRect.w / 8;
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 8; i++) {
+        ctx.beginPath();
+        ctx.moveTo(boardRect.x + i * cellSize, boardRect.y);
+        ctx.lineTo(boardRect.x + i * cellSize, boardRect.y + boardRect.h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(boardRect.x, boardRect.y + i * cellSize);
+        ctx.lineTo(boardRect.x + boardRect.w, boardRect.y + i * cellSize);
+        ctx.stroke();
+      }
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          if (board[r][c]) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+            ctx.fillRect(boardRect.x + c * cellSize, boardRect.y + r * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+      pieceRects.forEach((rect, i) => {
+        ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        const piece = pieces[i];
+        if (piece?.length > 0) {
+          const rows = piece.length;
+          const cols = piece[0].length;
+          const bsX = rect.w / cols;
+          const bsY = rect.h / rows;
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              if (piece[r][c]) {
+                ctx.fillStyle = 'rgba(255, 0, 255, 0.4)';
+                ctx.fillRect(rect.x + c * bsX, rect.y + r * bsY, bsX, bsY);
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderBoardGrid() {
+      boardGrid.innerHTML = board.map((row, r) => `
+        <div class="flex">${row.map((cell, c) => `
+          <button onclick="window.toggleBoardCell(${r}, ${c})" 
+            class="cell board-cell border border-gray-300 ${cell ? 'bg-blue-500' : 'bg-white hover:bg-gray-100'}"
+            title="Row ${r}, Col ${c}"
+          ></button>
+        `).join('')}</div>
+      `).join('');
+    }
+
+    function renderPieceGrid() {
+      const piece = pieces[selectedPiece];
+      if (!piece || piece.length === 0) {
+        pieceGrid.innerHTML = '<p class="text-gray-500 p-4">无数据</p>';
+        return;
+      }
+      pieceGrid.innerHTML = piece.map((row, r) => `
+        <div class="flex">${row.map((cell, c) => `
+          <button onclick="window.togglePieceCell(${r}, ${c})" 
+            class="cell piece-cell border border-gray-300 ${cell ? 'bg-purple-500' : 'bg-white hover:bg-gray-100'}"
+            title="Row ${r}, Col ${c}"
+          ></button>
+        `).join('')}</div>
+      `).join('');
+    }
+
+    window.toggleBoardCell = (r, c) => {
+      board[r][c] = !board[r][c];
+      renderBoardGrid();
+      updateJsonPreview();
+      drawOverlay();
+    };
+
+    window.togglePieceCell = (r, c) => {
+      pieces[selectedPiece][r][c] = !pieces[selectedPiece][r][c];
+      renderPieceGrid();
+      updateJsonPreview();
+      drawOverlay();
+    };
+
+    // Controls
+    document.getElementById('clearBoard').addEventListener('click', () => {
+      board = Array(8).fill(null).map(() => Array(8).fill(false));
+      renderBoardGrid();
+      updateJsonPreview();
+      drawOverlay();
+    });
+
+    document.getElementById('fillBoard').addEventListener('click', () => {
+      board = Array(8).fill(null).map(() => Array(8).fill(true));
+      renderBoardGrid();
+      updateJsonPreview();
+      drawOverlay();
+    });
+
+    document.getElementById('addRow').addEventListener('click', () => {
+      if (pieces[selectedPiece].length < 5) {
+        const cols = pieces[selectedPiece][0]?.length || 1;
+        pieces[selectedPiece].push(Array(cols).fill(false));
+        renderPieceGrid();
+        updateJsonPreview();
+        drawOverlay();
+      }
+    });
+
+    document.getElementById('removeRow').addEventListener('click', () => {
+      if (pieces[selectedPiece].length > 1) {
+        pieces[selectedPiece].pop();
+        renderPieceGrid();
+        updateJsonPreview();
+        drawOverlay();
+      }
+    });
+
+    document.getElementById('addCol').addEventListener('click', () => {
+      if (pieces[selectedPiece][0]?.length < 5) {
+        pieces[selectedPiece] = pieces[selectedPiece].map(row => [...row, false]);
+        renderPieceGrid();
+        updateJsonPreview();
+        drawOverlay();
+      }
+    });
+
+    document.getElementById('removeCol').addEventListener('click', () => {
+      if (pieces[selectedPiece][0]?.length > 1) {
+        pieces[selectedPiece] = pieces[selectedPiece].map(row => row.slice(0, -1));
+        renderPieceGrid();
+        updateJsonPreview();
+        drawOverlay();
+      }
+    });
+
+    document.getElementById('prevScreenshot').addEventListener('click', () => {
+      if (currentIndex > 0) loadScreenshot(currentIndex - 1);
+    });
+
+    document.getElementById('nextScreenshot').addEventListener('click', () => {
+      if (currentIndex < screenshots.length - 1) loadScreenshot(currentIndex + 1);
+    });
+
+    document.getElementById('reparseBtn').addEventListener('click', async () => {
+      screenshots[currentIndex].state = null;
+      await loadScreenshot(currentIndex);
+    });
+
+    document.getElementById('toggleOverlayBtn').addEventListener('click', () => {
+      showOverlay = !showOverlay;
+      drawOverlay();
+    });
+
+    function updateJsonPreview() {
+      jsonPreview.textContent = JSON.stringify({ board, pieces, boardRect, pieceRects }, null, 2);
+    }
+
+    document.getElementById('copyJson').addEventListener('click', () => {
+      navigator.clipboard.writeText(jsonPreview.textContent);
+      const btn = document.getElementById('copyJson');
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> 已复制';
+      setTimeout(() => btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> 复制', 2000);
+    });
+
+    document.getElementById('downloadJson').addEventListener('click', () => {
+      const state = { board, pieces, boardRect, pieceRects };
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = screenshots[currentIndex].name.replace('.jpeg', '.json').replace('.jpg', '.json');
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    exportAllBtn.addEventListener('click', () => {
+      screenshots.forEach((s, i) => {
+        if (s.state) {
+          const blob = new Blob([JSON.stringify(s.state, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = s.name.replace('.jpeg', '.json').replace('.jpg', '.json');
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
